@@ -15,17 +15,11 @@ import cv2
 import xml.etree.ElementTree as ET
 from natsort import natsorted
 
-import tensorflow as tf
-from object_detection.utils import label_map_util
-from object_detection.utils import config_util
-from object_detection.utils import visualization_utils as viz_utils
-from object_detection.builders import model_builder
-
 import torch
 import torch.utils.data
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
-from PyTorchHelpers.vision.references.detection.engine import evaluate
+#from PyTorchHelpers.vision.references.detection.engine import evaluate
 
 
 def extract_all_tar():
@@ -334,7 +328,7 @@ def define_parameters():
                       bottle_id: {'id': bottle_id, 'name': 'Beer Bottle'}}
 
 def inference_on_fine_tuned_model(model_loc, val_images):
-
+    pass
 
 
 def format_time(elapsed):

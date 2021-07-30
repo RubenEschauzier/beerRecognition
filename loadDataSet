@@ -1,0 +1,20 @@
+import fiftyone as fo
+import fiftyone.zoo as foz
+
+# https://stackoverflow.com/questions/68229288/fail-to-load-a-subpart-of-open-images-v6-with-fiftyone
+# List available zoo datasets
+#
+# Load the COCO-2017 validation split into a FiftyOne dataset
+#
+# This will download the dataset from the web, if necessary
+#
+dataset = foz.load_zoo_dataset( "open-images-v6", split="train", label_types = 'detections',
+                                classes = ['Beer'], num_workers=1)
+
+# Give the dataset a new name, and make it persistent so that you can
+# work with it in future sessions
+dataset.name = " open-images-v6"
+dataset.persistent = False
+
+# Visualize the in the App
+#session = fo.launch_app(dataset)
