@@ -120,13 +120,14 @@ def load_fine_tuned_model(model_path):
 def perform_forward_pass(frame, model, tensor_transform):
     prediction_dict = model([tensor_transform(frame)])
     predicted_boxes = []
+    num_objects = 0
     if prediction_dict[0]['scores'].shape[0] > 0:
-        print('Highest score: {}'.format(prediction_dict[0]['scores'][0]))
-        # print(prediction_dict)
+        # print('Highest score: {}'.format(prediction_dict[0]['scores'][0]))
         for object_num, score in enumerate(prediction_dict[0]['scores']):
-            if score > .4:
+            if score > .5:
                 predicted_boxes.append(prediction_dict[0]['boxes'][object_num].detach().numpy())
-
+                num_objects += 1
+    print('Found {} objects'.format(num_objects))
     return predicted_boxes
 
 
@@ -223,6 +224,48 @@ def within_bounding_box(point, box):
     return not not_within_box
 
 
+def get_box_per_part(divided_frames, model, transform, split_height, split_width, pad_size, start_end_list,
+                     start, end):
+    for i, frame in enumerate(divided_frames):
+        boxes = perform_forward_pass(frame, model, transform)
+        if boxes:
+            # To check for overlap take two bounding boxes, calculate overlap and see if overlap is equal to width *
+            # padsize!
+            for box in boxes:
+                if i == 0:
+                    start = [int(box[0]), int(box[1])]
+                    end = [int(box[2]), int(box[3])]
+                if i == 1:
+                    start = [int(box[0]), int(box[1]) + split_height[1] - pad_size]
+                    end = [int(box[2]), int(box[3]) + split_height[1] - pad_size]
+                if i == 2:
+                    start = [int(box[0]) + split_width[1] - pad_size, int(box[1])]
+                    end = [int(box[2]) + split_width[1] - pad_size, int(box[3])]
+                if i == 3:
+                    start = [int(box[0]) + split_width[1] - pad_size,
+                             int(box[1]) + split_height[1] - pad_size]
+                    end = [int(box[2]) + split_width[1] - pad_size, int(box[3]) + split_height[1] - pad_size]
+
+                start.extend(end)
+                start_end_list.append(start)
+    return start_end_list
+
+
+def update_tracked_bboxes(start_end_list, objects_to_track):
+    current_ids = objects_to_track.keys()
+    for bounding_box in start_end_list:
+        if within_bounding_box(posList, bounding_box):
+            if bounding_box in objects_to_track.values():
+                objects_to_track = {key: val for key, val in objects_to_track.items() if val != bounding_box}
+
+            else:
+                while True:
+                    random_id = random.randint(0, 100000)
+                    if random_id not in current_ids:
+                        break
+                objects_to_track[random_id] = bounding_box
+    return objects_to_track
+
 
 def perform_forward_pass_concurrent(q_in, q_out, model, tensor_transform):
     while True:
@@ -281,8 +324,8 @@ def main_object_detection(q_in, q_out, model, transform, split_width, split_heig
 def main_object_detection_serial(q_in, q_out, model, transform, split_width, split_height,
                                  pad_size, video_width, video_height):
     while True:
-        start = (0, 0)
-        end = (0, 0)
+        start = [(0, 0)]
+        end = [(0, 0)]
 
         start_end_list = []
         frame = q_in.get()
@@ -294,28 +337,12 @@ def main_object_detection_serial(q_in, q_out, model, transform, split_width, spl
         # Move this to other process
         divided_frames = divide_image(frame, split_width, split_height,
                                       pad_size, video_width, video_height)
+        # Gets boxes of split input image
+        start_end_list = get_box_per_part(divided_frames, model, transform, split_height, split_width,
+                                          pad_size, start_end_list, start, end)
 
-        for i, frame in enumerate(divided_frames):
-            boxes = perform_forward_pass(frame, model, transform)
-            if boxes:
-                # To check for overlap take two bounding boxes, calculate overlap and see if overlap is equal to width *
-                # padsize!
-                if i == 0:
-                    start = [int(boxes[0][0]), int(boxes[0][1])]
-                    end = [int(boxes[0][2]), int(boxes[0][3])]
-                if i == 1:
-                    start = [int(boxes[0][0]), int(boxes[0][1]) + split_height[1] - pad_size]
-                    end = [int(boxes[0][2]), int(boxes[0][3]) + split_height[1] - pad_size]
-                if i == 2:
-                    start = [int(boxes[0][0]) + split_width[1] - pad_size, int(boxes[0][1])]
-                    end = [int(boxes[0][2]) + split_width[1] - pad_size, int(boxes[0][3])]
-                if i == 3:
-                    start = [int(boxes[0][0]) + split_width[1] - pad_size,
-                             int(boxes[0][1]) + split_height[1] - pad_size]
-                    end = [int(boxes[0][2]) + split_width[1] - pad_size, int(boxes[0][3]) + split_height[1] - pad_size]
-
-                start.extend(end)
-                start_end_list.append(start)
+        # Merge boxes that overlap a lot, still need to implement recursive ish merging and fine-tune
+        # The min amount of overlap
         indices_to_remove = []
         for i in range(len(start_end_list)):
             for j in range(i, len(start_end_list)):
@@ -327,7 +354,7 @@ def main_object_detection_serial(q_in, q_out, model, transform, split_width, spl
                     inter, union = bops._box_inter_union(torch.as_tensor([start_end_list[i]]),
                                                          torch.as_tensor([start_end_list[j]]))
                     min_overlap = pad_size * max(end_i[0] - start_i[0],
-                                                       end_j[0] - start_j[0])
+                                                 end_j[0] - start_j[0])
                     if inter > min_overlap:
                         new_box = [min(start_i[0], start_j[0]), min(start_i[1], start_j[1]),
                                    max(end_i[0], end_j[0]), max(end_i[1], end_j[1])]
@@ -337,9 +364,10 @@ def main_object_detection_serial(q_in, q_out, model, transform, split_width, spl
                         indices_to_remove.append(j)
         # Not completely right, cant merge two merged bounding boxes, but is edge case so..
         for index in sorted(set(indices_to_remove), reverse=True):
-            del(start_end_list[index])
+            del (start_end_list[index])
 
         q_out.put(start_end_list)
+
 
 def main_video_co_occurring(model, transform):
     do_object_detection = True
@@ -350,13 +378,13 @@ def main_video_co_occurring(model, transform):
     video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-    def mousePress(event, x, y, flags, param):
+    def mouse_press(event, x, y, flags, param):
         global posList
         if event == cv2.EVENT_LBUTTONDOWN:
             posList = [x, y]
 
     cv2.namedWindow('image')
-    cv2.setMouseCallback('image', mousePress)
+    cv2.setMouseCallback('image', mouse_press)
 
     start_list = [(0, 0)]
     end_list = [(0, 0)]
@@ -378,6 +406,7 @@ def main_video_co_occurring(model, transform):
     split_width.append(video_width)
     split_height = list(range(0, video_height, video_height // height_divide))
     split_height.append(video_height)
+
     # Padding is to allow the algorithm to detect objects that are 'split' by the tiling object detection
     pad_size = 64
 
@@ -390,11 +419,10 @@ def main_video_co_occurring(model, transform):
                                               split_height, pad_size,
                                               video_width, video_height))
     p_process.start()
-
     q_in.put(frame)
 
     start_end_list = []
-    objects_to_track = []
+    objects_to_track = {}
 
     while True:
         t0 = time.time()
@@ -445,15 +473,14 @@ def main_video_co_occurring(model, transform):
         # Code for handling mouse pressed and adding an objects bounding boxes in to track array
         if not do_object_detection and posList:
             if start_end_list:
-                for bounding_box in start_end_list:
-                    if within_bounding_box(posList, bounding_box):
-                        if bounding_box in objects_to_track:
-                            objects_to_track.remove(bounding_box)
-                        else:
-                            objects_to_track.append(bounding_box)
-                        posList.clear()
-                        print(objects_to_track)
-                    pass
+                objects_to_track = update_tracked_bboxes(start_end_list, objects_to_track)
+            posList.clear()
+
+        # Here we start the object tracking, first check if there are objects to track
+        if key & 0xFF == ord('s'):
+            pass
+
+
         for start, end in zip(start_list, end_list):
             frame = cv2.rectangle(frame, start, end, (0, 255, 0), 2)
 
@@ -464,20 +491,10 @@ def main_video_co_occurring(model, transform):
     p_process.join()
 
 
-def main():
-    parent, child = multiprocessing.Pipe()
-    q = multiprocessing.Queue()
-    p = multiprocessing.Process(target=main_video_capture, args=(q,))
-    # p_process = multiprocessing.Process(target=main_object_detection, args=(child,))
-
-    p.start()
-    # p_process.start()
-
-
 if __name__ == '__main__':
     tensor_transform = torchvision.transforms.ToTensor()
     model_path = 'fine_tuned_model_pytorch/chk_point10'
-    model = load_fine_tuned_model(model_path)
+    model_loaded = load_fine_tuned_model(model_path)
     posList = []
 
-    main_video_co_occurring(model, tensor_transform)
+    main_video_co_occurring(model_loaded, tensor_transform)
