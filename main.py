@@ -132,6 +132,15 @@ def load_fine_tuned_model(model_path):
     model.eval()
     return model
 
+def load_cv2_model(proto_path, config_path, img):
+    net = cv2.dnn.readNetFromTensorflow(proto_path, config_path)
+    t0 = time.time()
+    net.setInput(cv2.dnn.blobFromImage(img, size=(300, 300), swapRB=True, crop=False))
+    classes, confidences, boxes = net.forward()
+    print(classes)
+    t1 = time.time()
+    print(t1- t0)
+
 
 def main_video():
     num_cores = multiprocessing.cpu_count()
@@ -292,6 +301,7 @@ def perform_forward_pass_concurrent(q_in, q_out, model, tensor_transform):
         q_out.put(predicted_boxes)
         print('Finished')
 
+
 def perform_forward_pass(frame, model, tensor_transform):
     prediction_dict = model([tensor_transform(frame)])
     predicted_boxes = []
@@ -304,7 +314,12 @@ def perform_forward_pass(frame, model, tensor_transform):
                 num_objects += 1
     return predicted_boxes
 
+
 def perform_forward_pass_opencv(frame, model):
+    classes, confidences, boxes = model.detect(frame, confThreshold=0.5)
+    print(classes)
+    print(confidences)
+    print(boxes)
 
 
 def main_object_detection(q_in, q_out, model, transform, split_width, split_height,
@@ -392,7 +407,7 @@ def main_object_detection_serial(q_in, q_out, model, transform, split_width, spl
         q_out.put(start_end_list)
 
 
-def main_video_co_occurring(model, transform):
+def main_video_co_occurring(model, transform, type_model='fine_tuned'):
     do_object_tracking = False
     do_object_detection = True
     q_in = multiprocessing.Queue(1)
@@ -434,10 +449,6 @@ def main_video_co_occurring(model, transform):
     # Padding is to allow the algorithm to detect objects that are 'split' by the tiling object detection
     pad_size = 64
 
-    # p_process = multiprocessing.Process(target=main_object_detection,
-    #                                     args=(q_in, q_out, model, transform, split_width,
-    #                                           split_height, pad_size,
-    #                                           video_width, video_height))
     p_process = multiprocessing.Process(target=main_object_detection_serial,
                                         args=(q_in, q_out, model, transform, split_width,
                                               split_height, pad_size,
@@ -446,7 +457,6 @@ def main_video_co_occurring(model, transform):
     q_in.put(frame)
 
     start_end_list = []
-    trackers = []
     objects_to_track = {}
     multi_tracker = cv2.legacy.MultiTracker_create()
 
@@ -454,6 +464,7 @@ def main_video_co_occurring(model, transform):
         t0 = time.time()
 
         ret, frame = capture_frame(video_capture)
+        perform_forward_pass_opencv(frame, model)
         # Code that detects if a key is pressed
         key = cv2.waitKey(1)
 
@@ -539,9 +550,20 @@ def main_video_co_occurring(model, transform):
 
 
 if __name__ == '__main__':
-    tensor_transform = torchvision.transforms.ToTensor()
     model_path = 'fine_tuned_model_pytorch/chk_point10'
+    path_proto = 'pretrained_models/ssd_mobilenet_v3_pretrained/frozen_inference_graph.pb'
+    path_config = 'pretrained_models/ssd_mobilenet_v3_pretrained/ssd_mobilenet_v3_large_coco_2020_01_14.pbtxt'
+    tensor_transform = torchvision.transforms.ToTensor()
+
+    video_capture = cv2.VideoCapture(0)
+    video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    ret, frame = capture_frame(video_capture)
+    video_capture.release()
+
     model_loaded = load_fine_tuned_model(model_path)
+    load_cv2_model(path_proto, path_config, frame)
     posList = []
 
-    main_video_co_occurring(model_loaded, tensor_transform)
+
+    # main_video_co_occurring(model_loaded, tensor_transform)
