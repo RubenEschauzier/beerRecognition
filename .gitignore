@@ -135,3 +135,4 @@ TensorFlow/
 fine_tuned_model/
 fine_tuned_model_pytorch/
 ILSVRC/
+pretrained_models/

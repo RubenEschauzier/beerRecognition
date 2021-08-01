@@ -21,7 +21,18 @@ import time
 # https://asp-eurasipjournals.springeropen.com/articles/10.1186/s13634-019-0646-0
 # https://www.pyimagesearch.com/2017/09/11/object-detection-with-deep-learning-and-opencv/
 # https://learnopencv.com/deep-learning-with-opencvs-dnn-module-a-definitive-guide/#why-choose-the-opencv-dnn-module
+# https://docs.opencv.org/4.5.2/d6/d0f/group__dnn.html
 
+# Pretrained models:
+# MobileNet v2:
+# http://download.tensorflow.org/models/object_detection/ssd_mobilenet_v2_coco_2018_03_29.tar.gz
+# https://github.com/opencv/opencv_extra/blob/master/testdata/dnn/ssd_mobilenet_v2_coco_2018_03_29.pbtxt
+# MobileNet v3:
+# http://download.tensorflow.org/models/object_detection/ssd_mobilenet_v3_large_coco_2020_01_14.tar.gz
+# https://gist.github.com/dkurt/54a8e8b51beb3bd3f770b79e56927bd7
+
+# Info:
+# https://github.com/opencv/opencv/pull/16760
 def process_images_rescale(train_images, train_annotations, size_scaled_img):
     """
     Rescale an image so that the shortest size is to size_scaled_img
@@ -120,20 +131,6 @@ def load_fine_tuned_model(model_path):
         model.cuda()
     model.eval()
     return model
-
-
-def perform_forward_pass(frame, model, tensor_transform):
-    prediction_dict = model([tensor_transform(frame)])
-    predicted_boxes = []
-    num_objects = 0
-    if prediction_dict[0]['scores'].shape[0] > 0:
-        # print('Highest score: {}'.format(prediction_dict[0]['scores'][0]))
-        for object_num, score in enumerate(prediction_dict[0]['scores']):
-            if score > .5:
-                predicted_boxes.append(prediction_dict[0]['boxes'][object_num].detach().numpy())
-                num_objects += 1
-    print('Found {} objects'.format(num_objects))
-    return predicted_boxes
 
 
 def main_video():
@@ -294,6 +291,20 @@ def perform_forward_pass_concurrent(q_in, q_out, model, tensor_transform):
 
         q_out.put(predicted_boxes)
         print('Finished')
+
+def perform_forward_pass(frame, model, tensor_transform):
+    prediction_dict = model([tensor_transform(frame)])
+    predicted_boxes = []
+    num_objects = 0
+    if prediction_dict[0]['scores'].shape[0] > 0:
+        # print('Highest score: {}'.format(prediction_dict[0]['scores'][0]))
+        for object_num, score in enumerate(prediction_dict[0]['scores']):
+            if score > .5:
+                predicted_boxes.append(prediction_dict[0]['boxes'][object_num].detach().numpy())
+                num_objects += 1
+    return predicted_boxes
+
+def perform_forward_pass_opencv(frame, model):
 
 
 def main_object_detection(q_in, q_out, model, transform, split_width, split_height,
