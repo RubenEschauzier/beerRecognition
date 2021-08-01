@@ -15,7 +15,12 @@ import time
 # https://dsp.stackexchange.com/questions/37523/how-can-i-track-detected-objects-from-frame-to-frame
 # https://stackoverflow.com/questions/15799487/parallel-image-detection-and-camera-preview-opencv-android
 # https://stackoverflow.com/questions/53286749/run-two-process-simultaneously-in-python
-# https://stackoverflow.com/questions/43078980/python-multiprocessing-with-generator
+# https://automaticaddison.com/how-to-do-multiple-object-tracking-using-opencv/
+
+# Tracking
+# https://asp-eurasipjournals.springeropen.com/articles/10.1186/s13634-019-0646-0
+# https://www.pyimagesearch.com/2017/09/11/object-detection-with-deep-learning-and-opencv/
+# https://learnopencv.com/deep-learning-with-opencvs-dnn-module-a-definitive-guide/#why-choose-the-opencv-dnn-module
 
 def process_images_rescale(train_images, train_annotations, size_scaled_img):
     """
@@ -224,6 +229,13 @@ def within_bounding_box(point, box):
     return not not_within_box
 
 
+def convert_bbox_to_cv2_format(box):
+    width = box[2] - box[0]
+    height = box[3] - box[1]
+    box_cv2_format = (box[0], box[1], width, height)
+    return box_cv2_format
+
+
 def get_box_per_part(divided_frames, model, transform, split_height, split_width, pad_size, start_end_list,
                      start, end):
     for i, frame in enumerate(divided_frames):
@@ -370,6 +382,7 @@ def main_object_detection_serial(q_in, q_out, model, transform, split_width, spl
 
 
 def main_video_co_occurring(model, transform):
+    do_object_tracking = False
     do_object_detection = True
     q_in = multiprocessing.Queue(1)
     q_out = multiprocessing.Queue()
@@ -422,7 +435,9 @@ def main_video_co_occurring(model, transform):
     q_in.put(frame)
 
     start_end_list = []
+    trackers = []
     objects_to_track = {}
+    multi_tracker = cv2.legacy.MultiTracker_create()
 
     while True:
         t0 = time.time()
@@ -462,6 +477,16 @@ def main_video_co_occurring(model, transform):
                         # Fix: Make it a list?
                         frame = cv2.rectangle(frame, start, end, (0, 255, 0), 2)
 
+        if do_object_tracking:
+            # Update the location of the bounding boxes
+            success, bboxes = multi_tracker.update(frame)
+
+            # Draw the bounding boxes on the video frame
+            for i, bbox in enumerate(bboxes):
+                start = (int(bbox[0]), int(bbox[1]))
+                end = (int(bbox[0] + bbox[2]),
+                           int(bbox[1] + bbox[3]))
+                cv2.rectangle(frame, start, end, (0, 255, 0), 2)
         # If pressed 'p' object detection will pause and the last bounding boxes are displayed
         # The video capture does keep running
         if key & 0xFF == ord('p'):
@@ -478,8 +503,19 @@ def main_video_co_occurring(model, transform):
 
         # Here we start the object tracking, first check if there are objects to track
         if key & 0xFF == ord('s'):
-            pass
-
+            if objects_to_track:
+                do_object_tracking = True
+                do_object_detection = False
+                for num_object, (id_object, object_box) in enumerate(objects_to_track.items()):
+                    # tracker = cv2.legacy.TrackerKCF_create()
+                    tracker = cv2.legacy.TrackerCSRT_create()
+                    cv2_box = convert_bbox_to_cv2_format(object_box)
+                    multi_tracker.add(tracker, frame, cv2_box)
+                    start_list = []
+                    end_list = []
+                print('Starting Object tracking')
+            else:
+                print('No objects to track')
 
         for start, end in zip(start_list, end_list):
             frame = cv2.rectangle(frame, start, end, (0, 255, 0), 2)
