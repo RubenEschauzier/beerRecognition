@@ -28,7 +28,26 @@ def extract_all_tar():
     :return: Nothing, just extracts tar file directories, this takes a while
     """
     with tarfile.open('image_data.tar') as tar:
-        tar.extractall(members=tar.getmembers())
+        def is_within_directory(directory, target):
+            
+            abs_directory = os.path.abspath(directory)
+            abs_target = os.path.abspath(target)
+        
+            prefix = os.path.commonprefix([abs_directory, abs_target])
+            
+            return prefix == abs_directory
+        
+        def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+        
+            for member in tar.getmembers():
+                member_path = os.path.join(path, member.name)
+                if not is_within_directory(path, member_path):
+                    raise Exception("Attempted Path Traversal in Tar File")
+        
+            tar.extractall(path, members, numeric_owner=numeric_owner) 
+            
+        
+        safe_extract(tar, members=tar.getmembers())
 
 
 def load_train_data(glass_folder, bottle_folder, annotations_glasses, annotations_bottles):
